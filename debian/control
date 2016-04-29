@@ -1,0 +1,38 @@
+Source: python-zeep
+Section: unknown
+Priority: optional
+Maintainer: Christoph Heuel <christoph.heuel@novero.com>
+Build-Depends: debhelper (>=9),dh-python, python-all (>= 2.6.6-3~), python-setuptools, python3-all, python3-setuptools
+Standards-Version: 3.9.6
+Homepage: https://github.com/mvantellingen/python-zeep
+X-Python-Version: >= 2.6
+X-Python3-Version: >= 3.2
+Vcs-Git: git@github.com:mvantellingen/python-zeep.git
+Vcs-Browser: https://github.com/mvantellingen/python-zeep/commits/master
+
+Package: python-zeep
+Architecture: all
+Depends: ${python:Depends}, ${misc:Depends}
+Suggests: python-zeep-doc
+Description: Zeep: Python SOAP client (Python 2)
+ A fast and hip Python SOAP client ;-)
+ .
+ This package installs the library for Python 2.
+
+Package: python3-zeep
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}
+Suggests: python-zeep-doc
+Description: Zeep: Python SOAP client (Python 3)
+ A fast and hip Python SOAP client ;-)
+ .
+ This package installs the library for Python 3.
+
+Package: python-zeep-doc
+Architecture: all
+Section: doc
+Depends: ${sphinxdoc:Depends}, ${misc:Depends}
+Description: Zeep: Python SOAP client (common documentation)
+ A fast and hip Python SOAP client ;-)
+ .
+ This is the common documentation package.
