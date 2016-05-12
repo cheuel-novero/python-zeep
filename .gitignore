@@ -11,3 +11,12 @@
 /docs/_build/
 /frutsels/
 /server/
+/debian/*.debhelper
+/debian/*.log
+.pybuild
+/debian/files
+.ropeproject
+/debian/python*-zeep
+/debian/*.substvars
+/debian/*-doc
+/debian/debhelper-build-stamp
