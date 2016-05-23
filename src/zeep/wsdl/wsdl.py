@@ -9,7 +9,7 @@ from lxml.etree import QName
 
 from zeep.parser import absolute_location, load_external, parse_xml
 from zeep.utils import findall_multiple_ns
-from zeep.wsdl import definitions, soap
+from zeep.wsdl import definitions, http, soap
 from zeep.xsd import Schema
 from zeep.xsd.context import ParserContext
 
@@ -186,7 +186,7 @@ class Definitions(object):
                 if etree.QName(document.tag).localname == 'schema':
                     self.schema = Schema(
                         document, self.wsdl.transport, location,
-                        self.wsdl._parser_context)
+                        self.wsdl._parser_context, location)
                 else:
                     wsdl = Definitions(self.wsdl, document, location)
                     self.imports[namespace] = wsdl
@@ -211,11 +211,15 @@ class Definitions(object):
 
         types = doc.find('wsdl:types', namespaces=NSMAP)
         if types is None:
-            return
+            return Schema(
+                None, self.wsdl.transport, self.location,
+                self.wsdl._parser_context, self.location)
 
         schema_nodes = findall_multiple_ns(types, 'xsd:schema', namespace_sets)
         if not schema_nodes:
-            return None
+            return Schema(
+                None, self.wsdl.transport, self.location,
+                self.wsdl._parser_context, self.location)
 
         # FIXME: This fixes `test_parse_types_nsmap_issues`, lame solution...
         schema_nodes = [
@@ -226,7 +230,7 @@ class Definitions(object):
         if len(schema_nodes) == 1:
             return Schema(
                 schema_nodes[0], self.wsdl.transport, self.location,
-                self.wsdl._parser_context)
+                self.wsdl._parser_context, self.location)
 
         # A wsdl can container multiple schema nodes. The can import each
         # other by simply referencing by the namespace. To handle this in a
@@ -238,8 +242,9 @@ class Definitions(object):
         schema_ns = {}
         for i, schema_node in enumerate(schema_nodes):
             ns = schema_node.get('targetNamespace')
-            schema_ns[ns] = 'intschema:xsd%d' % i
+            int_name = schema_ns[ns] = 'intschema:xsd%d' % i
             self.wsdl._parser_context.schema_nodes.add(schema_ns[ns], schema_node)
+            self.wsdl._parser_context.schema_locations[int_name] = self.location
 
         # Only handle the import statements from the 2001 xsd's for now
         import_tag = QName('http://www.w3.org/2001/XMLSchema', 'import').text
@@ -267,7 +272,7 @@ class Definitions(object):
         schema_node = root
         return Schema(
             schema_node, self.wsdl.transport, self.location,
-            self.wsdl._parser_context)
+            self.wsdl._parser_context, self.location)
 
     def parse_messages(self, doc):
         """
@@ -325,9 +330,10 @@ class Definitions(object):
                 binding = soap.Soap11Binding.parse(self, binding_node)
             elif soap.Soap12Binding.match(binding_node):
                 binding = soap.Soap12Binding.parse(self, binding_node)
-            # Still in development
-            # elif http.HttpBinding.match(binding_node):
-            #     binding = http.HttpBinding.parse(self, binding_node)
+            elif http.HttpGetBinding.match(binding_node):
+                binding = http.HttpGetBinding.parse(self, binding_node)
+            elif http.HttpPostBinding.match(binding_node):
+                binding = http.HttpPostBinding.parse(self, binding_node)
             else:
                 continue
 

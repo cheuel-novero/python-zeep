@@ -1,5 +1,4 @@
 import logging
-import warnings
 
 from zeep.transports import Transport
 from zeep.wsdl import WSDL
@@ -40,12 +39,12 @@ class ServiceProxy(object):
 
 class Client(object):
 
-    def __init__(self, wsdl, wsse=None, transport=None):
+    def __init__(self, wsdl, wsse=None, transport=None,
+                 service_name=None, port_name=None):
         self.transport = transport or Transport()
         self.wsdl = WSDL(wsdl, self.transport)
         self.wsse = wsse
-
-        self.service = self.bind()
+        self.service = self.bind(service_name=service_name, port_name=port_name)
 
     def bind(self, service_name=None, port_name=None):
         """Create a new ServiceProxy for the given service_name and port_name
@@ -55,6 +54,10 @@ class Client(object):
         required.
 
         """
+        if not self.wsdl.services:
+            raise ValueError(
+                "No services found in the WSDL. Are you using the correct URL?")
+
         if service_name:
             service = self.wsdl.services.get(service_name)
             if not service:
@@ -69,13 +72,6 @@ class Client(object):
         else:
             port = list(service.ports.values())[0]
         return ServiceProxy(self, port)
-
-    def get_port(self, service=None, port=None):
-        message = "This method will be removed in 0.6, please use bind()"
-        warnings.warn(message, DeprecationWarning, stacklevel=1)
-
-        service = list(self.wsdl.services.values())[0]
-        return list(service.ports.values())[0]
 
     def get_type(self, name):
         return self.wsdl.schema.get_type(name)

@@ -42,6 +42,12 @@ class UnresolvedType(Type):
 
 class SimpleType(Type):
 
+    def __eq__(self, other):
+        return (
+            other is not None and
+            self.__class__ == other.__class__ and
+            self.__dict__ == other.__dict__)
+
     def render(self, parent, value):
         parent.text = self.xmlvalue(value)
 
@@ -105,10 +111,10 @@ class ComplexType(Type):
         return result
 
     def serialize(self, value):
-        return {
-            field.name: field.serialize(getattr(value, field.name, None))
+        return OrderedDict([
+            (field.name, field.serialize(getattr(value, field.name, None)))
             for field in self.properties()
-        }
+        ])
 
     def render(self, parent, value):
         for name, element, container in self.fields():
@@ -152,10 +158,16 @@ class ComplexType(Type):
         return self
 
     def signature(self):
-        return ', '.join([
-            element._signature(name) if not container else container._signature()
-            for name, element, container in self.fields()
-        ])
+        parts = []
+        containers = set()
+        for name, element, container in self.fields():
+            if container is None:
+                parts.append(element._signature(name))
+            elif container not in containers:
+                parts.append(container._signature())
+                containers.add(container)
+
+        return ', '.join(parts)
 
     def parse_xmlelement(self, xmlelement):
         instance = self()
@@ -206,6 +218,16 @@ class ComplexType(Type):
 
     def __str__(self):
         return '%s(%s)' % (self.__class__.__name__, self.signature())
+
+
+class ListType(object):
+    def __init__(self, item_type):
+        self.item_type = item_type
+
+
+class UnionType(object):
+    def __init__(self, item_types):
+        self.item_types = item_types
 
 
 class CompoundValue(object):

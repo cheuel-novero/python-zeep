@@ -17,10 +17,11 @@ class tags(object):
 
 
 for name in [
-    'schema', 'import',
+    'schema', 'import', 'include',
     'annotation', 'element', 'simpleType', 'complexType',
     'simpleContent', 'complexContent',
-    'sequence', 'group', 'choice', 'all', 'attribute', 'any', 'anyAttribute',
+    'sequence', 'group', 'choice', 'all', 'list', 'union',
+    'attribute', 'any', 'anyAttribute', 'attributeGroup',
     'restriction', 'extension',
 
 ]:
@@ -43,6 +44,12 @@ class SchemaVisitor(object):
     def process_ref_attribute(self, node):
         ref = qname_attr(node, 'ref')
         if ref:
+
+            # Some wsdl's reference to xs:schema, we ignore that for now. It
+            # might be better in the future to process the actual schema file
+            # so that it is handled correctly
+            if ref.namespace == 'http://www.w3.org/2001/XMLSchema':
+                return
             return xsd_elements.RefElement(node.tag, ref, self.schema)
 
     def visit_schema(self, node):
@@ -91,7 +98,7 @@ class SchemaVisitor(object):
         location = node.get('schemaLocation')
 
         # Resolve import if it is a file
-        location = absolute_location(location, self.schema._location)
+        location = absolute_location(location, self.schema._base_url)
         schema = self.parser_context.schema_objects.get(location)
         if schema:
             logger.debug("Returning existing schema: %r", location)
@@ -100,11 +107,38 @@ class SchemaVisitor(object):
 
         schema_node = load_external(
             location, self.schema._transport, self.parser_context)
+
+        # If this schema location is 'internal' then retrieve the original
+        # location since that is used as base url for sub include/imports
+        if location in self.parser_context.schema_locations:
+            base_url = self.parser_context.schema_locations[location]
+        else:
+            base_url = location
+
         schema = self.schema.__class__(
-            schema_node, self.schema._transport, location, self.parser_context)
+            schema_node, self.schema._transport, location,
+            self.parser_context, base_url)
 
         self.schema._imports[namespace] = schema
         return schema
+
+    def visit_include(self, node, parent):
+        """
+        <include
+          id = ID
+          schemaLocation = anyURI
+          {any attributes with non-schema Namespace}...>
+        Content: (annotation?)
+        </include>
+        """
+        if not node.get('schemaLocation'):
+            raise NotImplementedError("schemaLocation is required")
+        location = node.get('schemaLocation')
+
+        schema_node = load_external(
+            location, self.schema._transport, self.parser_context,
+            base_url=self.schema._base_url)
+        return self.visit_schema(schema_node)
 
     def visit_element(self, node, parent):
         """
@@ -204,6 +238,16 @@ class SchemaVisitor(object):
             Content: (annotation?, (simpleType?))
             </attribute>
         """
+        is_global = parent.tag == tags.schema
+
+        # If the elment has a ref attribute then all other attributes cannot
+        # be present. Short circuit that here.
+        # Ref is prohibited on global elements (parent = schema)
+        if not is_global:
+            result = self.process_ref_attribute(node)
+            if result:
+                return result
+
         attribute_form = node.get('form', self.schema._attribute_form)
         if attribute_form == 'qualified':
             name = qname_attr(node, 'name', self.schema._target_namespace)
@@ -259,7 +303,7 @@ class SchemaVisitor(object):
                 self.visit_list(child, node)
 
             elif child.tag == tags.union:
-                self.visit_list(child, node)
+                self.visit_union(child, node)
 
         base_type = xsd_builtins.String
         xsd_type = type(name, (base_type,), {})()
@@ -305,6 +349,11 @@ class SchemaVisitor(object):
 
                 elif child.tag in (tags.choice, tags.sequence, tags.all):
                     assert not children
+
+                    # XXX: Not good
+                    if not isinstance(item, list):
+                        item = [item]
+
                     children = item
 
                 elif child.tag in (tags.attribute,):
@@ -412,7 +461,10 @@ class SchemaVisitor(object):
         base_name = qname_attr(node, 'base')
         try:
             base = self.schema.get_type(base_name)
-            children = base._children
+            if isinstance(base, xsd_types.ComplexType):
+                children = base._children
+            else:
+                children = [xsd_elements.Element(None, base)]
         except KeyError:
             children = [xsd_types.UnresolvedType(base_name)]
 
@@ -448,7 +500,7 @@ class SchemaVisitor(object):
             if isinstance(base, xsd_types.ComplexType):
                 children = base._children
             else:
-                children = [xsd_types.Element(None, base)]
+                children = [xsd_elements.Element(None, base)]
         except KeyError:
             children = [xsd_types.UnresolvedType(base_name)]
 
@@ -555,8 +607,21 @@ class SchemaVisitor(object):
             Content: (annotation?, (simpleType?))
             </list>
 
+        The use of the simpleType element child and the itemType attribute is
+        mutually exclusive.
+
         """
-        raise NotImplementedError()
+        item_type = qname_attr(node, 'itemType')
+        if item_type:
+            try:
+                xsd_type = self.schema.get_type(item_type.text)
+            except KeyError:
+                xsd_type = xsd_types.UnresolvedType(item_type.text)
+        else:
+            subnodes = node.getchildren()
+            child = subnodes[-1]
+            xsd_type = self.process(child, node)
+        return xsd_types.ListType(xsd_type)
 
     def visit_choice(self, node, parent):
         """
@@ -578,7 +643,7 @@ class SchemaVisitor(object):
             elm = self.process(child, node)
             elm.min_occurs = 0
             choices.append(elm)
-        return [xsd_elements.Choice(choices)]
+        return xsd_elements.Choice(choices)
 
     def visit_union(self, node, parent):
         """
@@ -589,7 +654,7 @@ class SchemaVisitor(object):
             Content: (annotation?, (simpleType*))
             </union>
         """
-        raise NotImplementedError()
+        return xsd_types.UnionType([])
 
     def visit_unique(self, node, parent):
         """
@@ -600,7 +665,7 @@ class SchemaVisitor(object):
             Content: (annotation?, (selector, field+))
             </unique>
         """
-        raise NotImplementedError()
+        pass
 
     def visit_attribute_group(self, node, parent):
         """
@@ -632,7 +697,9 @@ class SchemaVisitor(object):
         tags.group: visit_group,
         tags.attribute: visit_attribute,
         tags.import_: visit_import,
+        tags.include: visit_include,
         tags.annotation: visit_annotation,
+        tags.attributeGroup: visit_attribute_group,
     }
 
 
